@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple PDF Text Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Work+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <p class="eyebrow">Simple Browser Tool</p>
+        <h1>Edit PDF Text Fast</h1>
+        <p>
+          Upload your PDF, click any text field to edit, then download your
+          updated file.
+        </p>
+      </header>
+
+      <section class="controls" aria-label="Editor controls">
+        <label id="pdfDropZone" class="upload" for="pdfInput">
+          <input id="pdfInput" type="file" accept="application/pdf" />
+          <span id="uploadLabel">Upload PDF</span>
+        </label>
+
+        <label class="upload secondary" for="imageInput">
+          <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" disabled />
+          <span id="imageLabel">Add Picture</span>
+        </label>
+
+        <label class="zoom-wrap" for="zoomRange">
+          <span>Zoom</span>
+          <input id="zoomRange" type="range" min="80" max="200" value="130" step="10" />
+          <output id="zoomValue" for="zoomRange">130%</output>
+        </label>
+
+        <button id="toggleSignatureBtn" type="button" class="ghost" disabled>Signature Pad</button>
+        <button id="rerenderBtn" type="button" class="ghost" disabled>Apply Zoom</button>
+        <button id="downloadBtn" type="button" disabled>Download Edited PDF</button>
+      </section>
+
+      <p id="status" class="status" role="status">Upload a PDF to start editing.</p>
+      <p id="pageHint" class="page-hint">Selected page: -</p>
+
+      <section id="signaturePanel" class="signature-panel hidden" aria-label="Signature panel">
+        <p class="signature-title">Draw signature and place it on selected page</p>
+        <canvas id="signatureCanvas" class="signature-canvas" width="600" height="180"></canvas>
+        <div class="signature-actions">
+          <button id="clearSignatureBtn" type="button" class="ghost" disabled>Clear</button>
+          <button id="addSignatureBtn" type="button" disabled>Add Signature To Page</button>
+        </div>
+      </section>
+
+      <section id="editor" class="editor empty" aria-live="polite">
+        <p class="placeholder">Your editable PDF pages will appear here.</p>
+      </section>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
