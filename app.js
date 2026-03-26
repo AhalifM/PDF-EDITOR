@@ -667,7 +667,8 @@ function finalizeTextGroup(group) {
     boxHeightPx,
     maskWidthPx: Math.max(20, widestLinePx + 10),
     isMultiline,
-    renderMode: isMultiline || group.fragmentCount > 1 ? "raster" : "vector",
+    // Keep exported text visually consistent by avoiding PDF standard-font substitution.
+    renderMode: "raster",
   };
 }
 
