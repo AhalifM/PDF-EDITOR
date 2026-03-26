@@ -26,22 +26,15 @@
       <section class="controls" aria-label="Editor controls">
         <label id="pdfDropZone" class="upload" for="pdfInput">
           <input id="pdfInput" type="file" accept="application/pdf" />
-          <span id="uploadLabel">Upload PDF</span>
+          <span id="uploadLabel" class="upload-label">Upload PDF</span>
         </label>
 
         <label class="upload secondary" for="imageInput">
           <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" disabled />
-          <span id="imageLabel">Add Picture</span>
-        </label>
-
-        <label class="zoom-wrap" for="zoomRange">
-          <span>Zoom</span>
-          <input id="zoomRange" type="range" min="80" max="200" value="130" step="10" />
-          <output id="zoomValue" for="zoomRange">130%</output>
+          <span id="imageLabel" class="upload-label">Add Picture</span>
         </label>
 
         <button id="toggleSignatureBtn" type="button" class="ghost" disabled>Signature Pad</button>
-        <button id="rerenderBtn" type="button" class="ghost" disabled>Apply Zoom</button>
         <button id="downloadBtn" type="button" disabled>Download Edited PDF</button>
       </section>
 

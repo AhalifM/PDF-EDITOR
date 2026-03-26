@@ -7,9 +7,6 @@ const statusEl = document.getElementById("status");
 const pageHint = document.getElementById("pageHint");
 const editor = document.getElementById("editor");
 const downloadBtn = document.getElementById("downloadBtn");
-const rerenderBtn = document.getElementById("rerenderBtn");
-const zoomRange = document.getElementById("zoomRange");
-const zoomValue = document.getElementById("zoomValue");
 const toggleSignatureBtn = document.getElementById("toggleSignatureBtn");
 const signaturePanel = document.getElementById("signaturePanel");
 const signatureCanvas = document.getElementById("signatureCanvas");
@@ -24,7 +21,7 @@ const state = {
   fileName: "edited.pdf",
   pdfDoc: null,
   pages: [],
-  scale: Number(zoomRange.value) / 100,
+  scale: 1,
   isRendering: false,
   selectedPageIndex: null,
   assets: [],
@@ -75,20 +72,6 @@ imageInput.addEventListener("change", async (event) => {
   }
 });
 
-zoomRange.addEventListener("input", () => {
-  zoomValue.textContent = `${zoomRange.value}%`;
-  rerenderBtn.disabled = !state.originalBytes;
-});
-
-rerenderBtn.addEventListener("click", async () => {
-  if (!state.originalBytes) {
-    return;
-  }
-
-  state.scale = Number(zoomRange.value) / 100;
-  await renderCurrentPdf();
-});
-
 toggleSignatureBtn.addEventListener("click", () => {
   const isHidden = signaturePanel.classList.toggle("hidden");
   toggleSignatureBtn.textContent = isHidden ? "Signature Pad" : "Hide Signature Pad";
@@ -136,7 +119,6 @@ async function renderCurrentPdf() {
 
   state.isRendering = true;
   downloadBtn.disabled = true;
-  rerenderBtn.disabled = true;
   clearEditor();
   setStatus("Rendering PDF pages...");
 
@@ -180,7 +162,6 @@ async function renderCurrentPdf() {
     setToolsEnabled(false);
   } finally {
     state.isRendering = false;
-    rerenderBtn.disabled = !state.originalBytes;
   }
 }
 
@@ -359,93 +340,80 @@ async function renderPage(page, pageIndex) {
   editor.append(pageCard);
 
   const textContent = await page.getTextContent();
+  const textGroups = buildEditableTextGroups(textContent, viewport);
   const items = [];
 
-  for (const item of textContent.items) {
-    const itemString = item.str || "";
-    if (!itemString.trim()) {
-      continue;
-    }
-
-    const itemStyles = textContent.styles[item.fontName] || {};
-    const transformed = pdfjsLib.Util.transform(viewport.transform, item.transform);
-    const angleRad = Math.atan2(transformed[1], transformed[0]);
-    const angleDeg = (angleRad * 180) / Math.PI;
-
-    const fontSizePx = Math.max(8, Math.hypot(transformed[2], transformed[3]));
-    const displayFontFamily = pickCssFontFamily(itemStyles.fontFamily, item.fontName);
-    const fontTraits = deriveFontTraits(item.fontName, itemStyles.fontFamily);
-    const measuredWidthPx =
-      estimateTextWidthPx(
-        itemString,
-        fontSizePx,
-        displayFontFamily,
-        fontTraits.style,
-        fontTraits.weight
-      ) + 14;
-    const maskWidthPx = Math.max(20, item.width * state.scale + 10);
-    const fieldWidthPx = Math.max(20, item.width * state.scale + 10, measuredWidthPx);
-    const fieldHeightPx = Math.max(16, fontSizePx * 1.25);
-
-    const left = transformed[4];
-    const top = transformed[5] - fontSizePx;
-
+  for (const group of textGroups) {
     const sampled = sampleTextAndBackgroundColor(
       canvasContext,
-      left * outputScale,
-      top * outputScale,
-      fieldWidthPx * outputScale,
-      fieldHeightPx * outputScale
+      group.left * outputScale,
+      group.top * outputScale,
+      group.boxWidthPx * outputScale,
+      group.boxHeightPx * outputScale
     );
 
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "text-edit";
-    input.value = itemString;
+    const input = document.createElement(group.isMultiline ? "textarea" : "input");
+    if (!group.isMultiline) {
+      input.type = "text";
+    } else {
+      input.rows = group.lineCount;
+      input.wrap = "soft";
+      input.classList.add("multiline");
+    }
+
+    input.classList.add("text-edit");
+    input.value = group.text;
     input.spellcheck = false;
 
-    input.style.left = `${left}px`;
-    input.style.top = `${top}px`;
-    input.style.width = `${fieldWidthPx}px`;
-    input.style.height = `${fieldHeightPx}px`;
-    input.style.fontSize = `${fontSizePx}px`;
-    input.style.fontFamily = displayFontFamily;
-    input.style.fontWeight = fontTraits.weight;
-    input.style.fontStyle = fontTraits.style;
+    input.style.left = `${group.left}px`;
+    input.style.top = `${group.top}px`;
+    input.style.width = `${group.boxWidthPx}px`;
+    input.style.height = `${group.boxHeightPx}px`;
+    input.style.fontSize = `${group.fontSizePx}px`;
+    input.style.fontFamily = group.fontFamily;
+    input.style.fontWeight = group.fontWeight;
+    input.style.fontStyle = group.fontStyle;
     input.style.setProperty("--field-color", sampled.textCss);
     input.style.setProperty("--field-bg", sampled.bgCss);
-    input.style.setProperty("--mask-width", `${maskWidthPx}px`);
+    input.style.setProperty("--mask-width", `${group.maskWidthPx}px`);
     input.style.transformOrigin = "left top";
 
-    if (Math.abs(angleDeg) > 0.4) {
-      input.style.transform = `rotate(${angleDeg}deg)`;
+    if (Math.abs(group.rotationDeg) > 0.4) {
+      input.style.transform = `rotate(${group.rotationDeg}deg)`;
     }
 
     const itemRecord = {
       pageIndex,
-      original: itemString,
-      value: itemString,
+      original: group.text,
+      value: group.text,
       input,
-      pdfX: item.transform[4],
-      pdfY: item.transform[5],
-      widthPdf: item.width,
-      fontName: item.fontName,
-      fontFamily: displayFontFamily,
-      fontWeight: fontTraits.weight,
-      fontStyle: fontTraits.style,
-      fontSizePdf: Math.max(4, fontSizePx / state.scale),
+      pdfX: group.pdfX,
+      pdfY: group.pdfY,
+      widthPdf: group.widthPdf,
+      fontName: group.fontName,
+      fontFamily: group.fontFamily,
+      fontWeight: group.fontWeight,
+      fontStyle: group.fontStyle,
+      fontSizePdf: group.fontSizePdf,
       textColorRgb: sampled.textRgb,
       bgColorRgb: sampled.bgRgb,
-      rotationDeg: angleDeg,
-      baseInputWidthPx: fieldWidthPx,
-      maskWidthPx,
-      maskWidthPdf: maskWidthPx / state.scale,
-      maskHeightPdf: fieldHeightPx / state.scale,
+      rotationDeg: group.rotationDeg,
+      baseInputWidthPx: group.boxWidthPx,
+      baseInputHeightPx: group.boxHeightPx,
+      lineHeightPx: group.lineHeightPx,
+      maskWidthPx: group.maskWidthPx,
+      maskWidthPdf: group.maskWidthPx / state.scale,
+      maskHeightPx: group.boxHeightPx,
+      maskHeightPdf: group.boxHeightPx / state.scale,
+      isMultiline: group.isMultiline,
+      renderMode: group.renderMode,
+      fragmentCount: group.fragmentCount,
+      lineCount: group.lineCount,
     };
 
     input.addEventListener("input", () => {
       itemRecord.value = input.value;
-      fitInputWidth(input, itemRecord.baseInputWidthPx);
+      fitTextEditorBounds(input, itemRecord);
       syncInputVisibility(itemRecord);
     });
 
@@ -458,7 +426,7 @@ async function renderPage(page, pageIndex) {
     });
 
     textLayer.append(input);
-    fitInputWidth(input, itemRecord.baseInputWidthPx);
+    fitTextEditorBounds(input, itemRecord);
     syncInputVisibility(itemRecord);
     items.push(itemRecord);
   }
@@ -473,6 +441,262 @@ async function renderPage(page, pageIndex) {
     pageWrap,
     assetLayer,
   };
+}
+
+function buildEditableTextGroups(textContent, viewport) {
+  const fragments = extractTextFragments(textContent, viewport);
+  const lines = buildTextLines(fragments);
+  const groups = [];
+  let currentGroup = null;
+
+  for (const line of lines) {
+    if (!currentGroup || !canMergeLineIntoGroup(currentGroup, line)) {
+      if (currentGroup) {
+        groups.push(finalizeTextGroup(currentGroup));
+      }
+      currentGroup = createTextGroup(line);
+      continue;
+    }
+
+    appendLineToTextGroup(currentGroup, line);
+  }
+
+  if (currentGroup) {
+    groups.push(finalizeTextGroup(currentGroup));
+  }
+
+  return groups;
+}
+
+function extractTextFragments(textContent, viewport) {
+  const fragments = [];
+
+  for (const item of textContent.items) {
+    const itemString = item.str || "";
+    if (!itemString.trim()) {
+      continue;
+    }
+
+    const itemStyles = textContent.styles[item.fontName] || {};
+    const transformed = pdfjsLib.Util.transform(viewport.transform, item.transform);
+    const angleRad = Math.atan2(transformed[1], transformed[0]);
+    const angleDeg = (angleRad * 180) / Math.PI;
+    const fontSizePx = Math.max(8, Math.hypot(transformed[2], transformed[3]));
+    const fontTraits = deriveFontTraits(item.fontName, itemStyles.fontFamily);
+    const fontFamily = pickCssFontFamily(itemStyles.fontFamily, item.fontName);
+    const measuredWidthPx = estimateTextWidthPx(
+      itemString,
+      fontSizePx,
+      fontFamily,
+      fontTraits.style,
+      fontTraits.weight
+    );
+    const textWidthPx = Math.max(Math.abs(item.width) * state.scale, measuredWidthPx);
+    const textHeightPx = Math.max(16, fontSizePx * 1.25);
+    const left = transformed[4];
+    const top = transformed[5] - fontSizePx;
+
+    fragments.push({
+      text: itemString,
+      left,
+      top,
+      right: left + textWidthPx,
+      bottom: top + textHeightPx,
+      baselinePx: transformed[5],
+      pdfX: item.transform[4],
+      pdfY: item.transform[5],
+      widthPdf: Math.abs(item.width),
+      fontName: item.fontName,
+      fontFamily,
+      fontWeight: fontTraits.weight,
+      fontStyle: fontTraits.style,
+      fontSizePx,
+      fontSizePdf: Math.max(4, fontSizePx / state.scale),
+      rotationDeg: angleDeg,
+      lineHeightPx: textHeightPx,
+      hasEOL: Boolean(item.hasEOL),
+    });
+  }
+
+  return fragments;
+}
+
+function buildTextLines(fragments) {
+  const lines = [];
+  let currentLine = null;
+
+  for (const fragment of fragments) {
+    if (!currentLine) {
+      currentLine = createTextLine(fragment);
+    } else if (canAppendFragmentToLine(currentLine, fragment)) {
+      appendFragmentToTextLine(currentLine, fragment);
+    } else {
+      lines.push(currentLine);
+      currentLine = createTextLine(fragment);
+    }
+
+    if (fragment.hasEOL) {
+      lines.push(currentLine);
+      currentLine = null;
+    }
+  }
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines;
+}
+
+function createTextLine(fragment) {
+  return {
+    fragments: [fragment],
+    text: fragment.text,
+    left: fragment.left,
+    right: fragment.right,
+    top: fragment.top,
+    bottom: fragment.bottom,
+    baselinePx: fragment.baselinePx,
+    pdfX: fragment.pdfX,
+    pdfY: fragment.pdfY,
+    widthPdf: fragment.widthPdf,
+    fontName: fragment.fontName,
+    fontFamily: fragment.fontFamily,
+    fontWeight: fragment.fontWeight,
+    fontStyle: fragment.fontStyle,
+    fontSizePx: fragment.fontSizePx,
+    fontSizePdf: fragment.fontSizePdf,
+    rotationDeg: fragment.rotationDeg,
+    lineHeightPx: fragment.lineHeightPx,
+  };
+}
+
+function appendFragmentToTextLine(line, fragment) {
+  const gapPx = fragment.left - line.right;
+  line.text = joinTextSegments(line.text, fragment.text, gapPx, fragment.fontSizePx);
+  line.fragments.push(fragment);
+  line.right = Math.max(line.right, fragment.right);
+  line.top = Math.min(line.top, fragment.top);
+  line.bottom = Math.max(line.bottom, fragment.bottom);
+  line.lineHeightPx = Math.max(line.lineHeightPx, fragment.lineHeightPx);
+}
+
+function canAppendFragmentToLine(line, fragment) {
+  if (!haveSimilarTextStyle(line, fragment)) {
+    return false;
+  }
+
+  const baselineTolerance = Math.max(4, Math.min(line.lineHeightPx, fragment.lineHeightPx) * 0.45);
+  if (Math.abs(line.baselinePx - fragment.baselinePx) > baselineTolerance) {
+    return false;
+  }
+
+  const gapPx = fragment.left - line.right;
+  const overlapAllowance = Math.max(4, fragment.fontSizePx * 0.35);
+  const gapTolerance = Math.max(18, fragment.fontSizePx * 1.35);
+  return gapPx >= -overlapAllowance && gapPx <= gapTolerance;
+}
+
+function createTextGroup(line) {
+  return {
+    lines: [line],
+    text: line.text,
+    left: line.left,
+    top: line.top,
+    right: line.right,
+    bottom: line.bottom,
+    pdfX: line.pdfX,
+    pdfY: line.pdfY,
+    widthPdf: line.widthPdf,
+    fontName: line.fontName,
+    fontFamily: line.fontFamily,
+    fontWeight: line.fontWeight,
+    fontStyle: line.fontStyle,
+    fontSizePx: line.fontSizePx,
+    fontSizePdf: line.fontSizePdf,
+    rotationDeg: line.rotationDeg,
+    lineHeightPx: line.lineHeightPx,
+    fragmentCount: line.fragments.length,
+    lineCount: 1,
+  };
+}
+
+function appendLineToTextGroup(group, line) {
+  group.lines.push(line);
+  group.text += `\n${line.text}`;
+  group.right = Math.max(group.right, line.right);
+  group.bottom = Math.max(group.bottom, line.bottom);
+  group.lineHeightPx = Math.max(group.lineHeightPx, line.lineHeightPx);
+  group.fragmentCount += line.fragments.length;
+  group.lineCount += 1;
+}
+
+function canMergeLineIntoGroup(group, line) {
+  const lastLine = group.lines[group.lines.length - 1];
+  if (!haveSimilarTextStyle(lastLine, line)) {
+    return false;
+  }
+
+  const verticalGapPx = line.top - lastLine.bottom;
+  const verticalTolerance = Math.max(8, lastLine.lineHeightPx * 1.1);
+  if (verticalGapPx < -2 || verticalGapPx > verticalTolerance) {
+    return false;
+  }
+
+  const leftTolerance = Math.max(10, Math.min(lastLine.fontSizePx, line.fontSizePx) * 1.15);
+  const leftAligned = Math.abs(lastLine.left - line.left) <= leftTolerance;
+  const overlapWidth =
+    Math.min(lastLine.right, line.right) - Math.max(lastLine.left, line.left);
+  const requiredOverlap = Math.min(lastLine.right - lastLine.left, line.right - line.left) * 0.35;
+
+  return leftAligned || overlapWidth >= requiredOverlap;
+}
+
+function finalizeTextGroup(group) {
+  const widestLinePx = group.lines.reduce(
+    (maxWidth, line) => Math.max(maxWidth, line.right - line.left),
+    0
+  );
+  const boxWidthPx = Math.max(20, widestLinePx + 14);
+  const boxHeightPx = Math.max(group.lineHeightPx, group.bottom - group.top + 6);
+  const isMultiline = group.lineCount > 1;
+
+  return {
+    ...group,
+    boxWidthPx,
+    boxHeightPx,
+    maskWidthPx: Math.max(20, widestLinePx + 10),
+    isMultiline,
+    renderMode: isMultiline || group.fragmentCount > 1 ? "raster" : "vector",
+  };
+}
+
+function haveSimilarTextStyle(a, b) {
+  const fontSizeTolerance = Math.max(1.25, Math.min(a.fontSizePx, b.fontSizePx) * 0.22);
+  return (
+    a.fontFamily === b.fontFamily &&
+    a.fontWeight === b.fontWeight &&
+    a.fontStyle === b.fontStyle &&
+    Math.abs(a.fontSizePx - b.fontSizePx) <= fontSizeTolerance &&
+    Math.abs(a.rotationDeg - b.rotationDeg) <= 1
+  );
+}
+
+function joinTextSegments(currentText, nextText, gapPx, fontSizePx) {
+  if (!currentText) {
+    return nextText;
+  }
+
+  if (/\s$/.test(currentText) || /^\s/.test(nextText)) {
+    return currentText + nextText;
+  }
+
+  if (/^[,.;:!?)}\]]/.test(nextText)) {
+    return currentText + nextText;
+  }
+
+  const needsSpace = gapPx > Math.max(2, fontSizePx * 0.18);
+  return needsSpace ? `${currentText} ${nextText}` : currentText + nextText;
 }
 
 async function addAssetFromDataUrl(dataUrl, type) {
@@ -751,6 +975,11 @@ async function buildEditedPdf() {
 }
 
 async function drawEditedText(pdfDoc, page, item, fontCache) {
+  if (item.renderMode === "raster" || item.isMultiline) {
+    await drawRasterTextPatch(pdfDoc, page, item);
+    return;
+  }
+
   try {
     const font = await resolveEmbeddedPdfFont(pdfDoc, item, fontCache);
     if (!canFontEncodeText(font, item.value)) {
@@ -789,7 +1018,10 @@ async function drawEditedText(pdfDoc, page, item, fontCache) {
 function buildTextPatchSpec(item) {
   const inputHeightPx =
     Number.parseFloat(item.input.style.height) ||
-    Math.max(16, item.fontSizePdf * state.scale * 1.25);
+    Math.max(item.baseInputHeightPx || 16, item.fontSizePdf * state.scale * 1.25);
+  const inputWidthPx =
+    Number.parseFloat(item.input.style.width) ||
+    Math.max(item.baseInputWidthPx || 20, item.widthPdf * state.scale + 10);
   const fontSizePx =
     Number.parseFloat(item.input.style.fontSize) || Math.max(8, item.fontSizePdf * state.scale);
   const fontFamily = item.input.style.fontFamily || item.fontFamily || "sans-serif";
@@ -797,17 +1029,32 @@ function buildTextPatchSpec(item) {
   const fontWeight = item.input.style.fontWeight || item.fontWeight || "400";
 
   const padX = 4;
+  const padRight = 4;
   const padTop = 3;
   const padBottom = 4;
   const patchScale = Math.max(3, Math.ceil(window.devicePixelRatio || 1));
-  const measuredTextWidth =
-    estimateTextWidthPx(item.value, fontSizePx, fontFamily, fontStyle, fontWeight) + padX * 2 + 4;
+  const wrapWidthPx = Math.max(24, inputWidthPx - padX - padRight);
+  const lines = item.isMultiline
+    ? measureWrappedTextLines(item.value, wrapWidthPx, fontSizePx, fontFamily, fontStyle, fontWeight)
+    : [item.value];
+  const measuredTextWidth = lines.reduce(
+    (maxWidth, line) =>
+      Math.max(
+        maxWidth,
+        estimateTextWidthPx(line, fontSizePx, fontFamily, fontStyle, fontWeight)
+      ),
+    0
+  );
+  const lineHeightPx = item.isMultiline
+    ? Math.max(item.lineHeightPx || fontSizePx * 1.2, fontSizePx * 1.15)
+    : Math.max(item.lineHeightPx || fontSizePx * 1.15, fontSizePx * 1.15);
   const coverWidthPx = Math.max(
     1,
-    Number.isFinite(item.maskWidthPx) ? item.maskWidthPx : item.widthPdf * state.scale + padX * 2
+    Number.isFinite(item.maskWidthPx) ? item.maskWidthPx : inputWidthPx
   );
-  const patchWidthPx = Math.max(coverWidthPx, measuredTextWidth);
-  const patchHeightPx = Math.max(inputHeightPx + padTop + padBottom, fontSizePx * 1.45);
+  const patchWidthPx = Math.max(coverWidthPx, inputWidthPx, measuredTextWidth + padX + padRight);
+  const textHeightPx = Math.max(lineHeightPx * Math.max(lines.length, 1), fontSizePx * 1.2);
+  const patchHeightPx = Math.max(inputHeightPx + padTop + padBottom, textHeightPx + padTop + padBottom);
   const baselineYPx = padTop + fontSizePx * 0.94;
 
   const canvas = document.createElement("canvas");
@@ -817,13 +1064,15 @@ function buildTextPatchSpec(item) {
   const ctx = canvas.getContext("2d");
   ctx.scale(patchScale, patchScale);
   ctx.fillStyle = `rgb(${item.bgColorRgb.r}, ${item.bgColorRgb.g}, ${item.bgColorRgb.b})`;
-  ctx.fillRect(0, 0, coverWidthPx, patchHeightPx);
+  ctx.fillRect(0, 0, patchWidthPx, patchHeightPx);
 
   if (item.value.trim()) {
     ctx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = `rgb(${item.textColorRgb.r}, ${item.textColorRgb.g}, ${item.textColorRgb.b})`;
-    ctx.fillText(item.value, padX, baselineYPx);
+    lines.forEach((line, index) => {
+      ctx.fillText(line, padX, baselineYPx + index * lineHeightPx);
+    });
   }
 
   return {
@@ -1018,16 +1267,71 @@ function estimateTextWidthPx(text, fontSizePx, fontFamily, fontStyle = "normal",
   return ctx.measureText(text || "").width;
 }
 
-function fitInputWidth(input, minWidth) {
+function fitTextEditorBounds(input, itemRecord) {
+  if (itemRecord.isMultiline) {
+    input.style.width = `${itemRecord.baseInputWidthPx}px`;
+    input.style.height = "1px";
+    const nextHeight = Math.max(itemRecord.baseInputHeightPx, input.scrollHeight + 2);
+    input.style.height = `${nextHeight}px`;
+    itemRecord.maskHeightPx = nextHeight;
+    itemRecord.maskHeightPdf = nextHeight / state.scale;
+    return;
+  }
+
   input.style.width = "1px";
   const needed = Math.ceil(input.scrollWidth + 12);
-  input.style.width = `${Math.max(minWidth, needed)}px`;
+  const nextWidth = Math.max(itemRecord.baseInputWidthPx, needed);
+  input.style.width = `${nextWidth}px`;
+  itemRecord.maskWidthPx = nextWidth;
+  itemRecord.maskWidthPdf = nextWidth / state.scale;
 }
 
 function syncInputVisibility(itemRecord) {
   const isFocused = document.activeElement === itemRecord.input;
   const isChanged = itemRecord.value !== itemRecord.original;
   itemRecord.input.classList.toggle("is-visible", isFocused || isChanged);
+}
+
+function measureWrappedTextLines(
+  text,
+  maxWidthPx,
+  fontSizePx,
+  fontFamily,
+  fontStyle = "normal",
+  fontWeight = "400"
+) {
+  const normalized = String(text || "").replace(/\r\n?/g, "\n");
+  const rawLines = normalized.split("\n");
+  const wrappedLines = [];
+
+  for (const rawLine of rawLines) {
+    const trimmedLine = rawLine.trim();
+    if (!trimmedLine) {
+      wrappedLines.push("");
+      continue;
+    }
+
+    let currentLine = "";
+    const words = trimmedLine.split(/\s+/);
+
+    for (const word of words) {
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+      if (
+        !currentLine ||
+        estimateTextWidthPx(candidate, fontSizePx, fontFamily, fontStyle, fontWeight) <= maxWidthPx
+      ) {
+        currentLine = candidate;
+        continue;
+      }
+
+      wrappedLines.push(currentLine);
+      currentLine = word;
+    }
+
+    wrappedLines.push(currentLine);
+  }
+
+  return wrappedLines.length > 0 ? wrappedLines : [""];
 }
 
 function sampleTextAndBackgroundColor(context, x, y, width, height) {

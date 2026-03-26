@@ -70,7 +70,6 @@ h1 {
 }
 
 .upload,
-.zoom-wrap,
 button {
   min-height: 2.9rem;
   border-radius: 0.85rem;
@@ -81,11 +80,21 @@ button {
 .upload {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   position: relative;
   overflow: hidden;
+  padding: 0.75rem 0.9rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.upload-label {
+  display: block;
+  width: 100%;
+  line-height: 1.25;
+  text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .upload.dragover {
@@ -112,23 +121,6 @@ body.pdf-dragover {
 .upload.secondary.disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.zoom-wrap {
-  display: grid;
-  gap: 0.35rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--muted);
-}
-
-.zoom-wrap span,
-.zoom-wrap output {
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.zoom-wrap input {
-  width: 100%;
 }
 
 button {
@@ -296,11 +288,18 @@ button:not(:disabled):hover {
   outline: none;
   box-shadow: none;
   white-space: nowrap;
+  overflow: hidden;
   line-height: 1.15;
   background: transparent;
   color: transparent;
   -webkit-text-fill-color: transparent;
   caret-color: var(--field-color, #202020);
+}
+
+.text-edit.multiline {
+  resize: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .text-edit:hover {
